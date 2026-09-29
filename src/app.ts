@@ -7,7 +7,10 @@ import { corsOrigins, env } from "./config/env";
 import { registerErrorHandler } from "./lib/errors";
 import { registerAuth } from "./plugins/auth";
 import { authRoutes } from "./modules/auth/routes";
+import { categoryRoutes } from "./modules/categories/routes";
 import { healthRoutes } from "./modules/health/routes";
+import { productRoutes } from "./modules/products/routes";
+import { stockRoutes } from "./modules/stock/routes";
 
 /**
  * Builds and configures the Fastify instance (plugins + routes) without
@@ -32,6 +35,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     async (api) => {
       await api.register(healthRoutes);
       await api.register(authRoutes);
+      await api.register(categoryRoutes);
+      await api.register(productRoutes);
+      await api.register(stockRoutes);
     },
     { prefix: "/api/v1" },
   );

@@ -1,8 +1,8 @@
 // MozudKhata database schema (backend-owned) — see ../docs/database.md.
-// Phase 02 introduces the auth tables (users, sessions). Domain tables
-// (categories, products, stock_movements) arrive in Phase 03.
-// Migrations run once a real DATABASE_URL (Neon) is provided; `prisma generate`
-// works offline so the typed client + data layer are ready regardless.
+// Phase 02 introduces the auth tables (users, sessions). Phase 03 adds the
+// domain tables (categories, products, stock_movements) + the append-only
+// stock ledger. `prisma generate` works offline so the typed client + data
+// layer are ready regardless; migrations apply once a real DATABASE_URL exists.
 
 generator client {
   provider = "prisma-client-js"
@@ -23,7 +23,11 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  sessions Session[]
+  sessions       Session[]
+  categories     Category[]
+  products       Product[]
+  ownedMovements StockMovement[] @relation("MovementOwner")
+  actedMovements StockMovement[] @relation("MovementActor")
 
   @@map("users")
 }
@@ -45,4 +49,88 @@ model Session {
 
   @@index([userId])
   @@map("sessions")
+}
+
+/// The kind of stock movement recorded in the append-only ledger. `IN` adds
+/// stock, `OUT` removes it (a sale/use), `DAMAGED_LOST` removes it (shrinkage),
+/// and `ADJUSTMENT` is a signed correction to reconcile a counted discrepancy.
+enum MovementType {
+  IN
+  OUT
+  ADJUSTMENT
+  DAMAGED_LOST
+}
+
+/// A product grouping owned by a user. Names are unique per owner. Soft-deleted
+/// via `archivedAt` (ADR-009) so history/audit is preserved.
+model Category {
+  id         String    @id @default(uuid()) @db.Uuid
+  ownerId    String    @map("owner_id") @db.Uuid
+  name       String
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  owner    User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  // Unique per owner. (Includes archived rows — Phase 04 CRUD decides whether to
+  // free a name on archive; the DB simply guarantees no duplicate live+archived.)
+  @@unique([ownerId, name])
+  @@index([ownerId])
+  @@map("categories")
+}
+
+/// An inventory item owned by a user. `quantity` is a transactionally-maintained
+/// CACHE of the signed sum of its `stock_movements` (never written outside the
+/// stock service — ADR-004). Quantities are numeric(12,3), never floats (ADR-008).
+model Product {
+  id                String    @id @default(uuid()) @db.Uuid
+  ownerId           String    @map("owner_id") @db.Uuid
+  categoryId        String?   @map("category_id") @db.Uuid
+  name              String
+  sku               String?
+  unit              String    @default("pcs")
+  quantity          Decimal   @default(0) @db.Decimal(12, 3)
+  lowStockThreshold Decimal   @default(0) @map("low_stock_threshold") @db.Decimal(12, 3)
+  description        String?
+  archivedAt        DateTime? @map("archived_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  owner     User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  category  Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  movements StockMovement[]
+
+  // SKU is unique per owner *when present*: Postgres treats NULLs as distinct in
+  // a unique index, so multiple SKU-less products per owner are allowed.
+  @@unique([ownerId, sku])
+  @@index([ownerId])
+  @@index([ownerId, categoryId])
+  @@index([ownerId, name])
+  @@map("products")
+}
+
+/// Append-only ledger entry — the source of truth for stock (ADR-004). Rows are
+/// immutable (no `updatedAt`); corrections are new `ADJUSTMENT` movements.
+/// `quantityDelta` is the signed change; `balanceAfter` is the product quantity
+/// after this movement (both numeric(12,3)). Written only by the stock service.
+model StockMovement {
+  id            String       @id @default(uuid()) @db.Uuid
+  ownerId       String       @map("owner_id") @db.Uuid
+  productId     String       @map("product_id") @db.Uuid
+  type          MovementType
+  quantityDelta Decimal      @map("quantity_delta") @db.Decimal(12, 3)
+  balanceAfter  Decimal      @map("balance_after") @db.Decimal(12, 3)
+  reason        String?
+  actorId       String       @map("actor_id") @db.Uuid
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  owner   User    @relation("MovementOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  actor   User    @relation("MovementActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([productId, createdAt(sort: Desc)])
+  @@index([ownerId, createdAt(sort: Desc)])
+  @@map("stock_movements")
 }
