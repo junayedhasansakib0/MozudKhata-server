@@ -1,0 +1,48 @@
+// MozudKhata database schema (backend-owned) — see ../docs/database.md.
+// Phase 02 introduces the auth tables (users, sessions). Domain tables
+// (categories, products, stock_movements) arrive in Phase 03.
+// Migrations run once a real DATABASE_URL (Neon) is provided; `prisma generate`
+// works offline so the typed client + data layer are ready regardless.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// An application account. Email is stored normalized (trimmed + lowercased by
+/// the app layer) so a plain unique index enforces case-insensitive uniqueness.
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sessions Session[]
+
+  @@map("users")
+}
+
+/// A revocable server-side session (ADR-014). The raw opaque token is only ever
+/// sent to the client in an httpOnly cookie; only its SHA-256 hash is stored.
+/// Logout deletes the row; rolling renewal extends `expiresAt` on active use.
+model Session {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(6)
+  userAgent  String?   @map("user_agent")
+  ip         String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
