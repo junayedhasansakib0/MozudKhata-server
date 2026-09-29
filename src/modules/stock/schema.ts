@@ -30,4 +30,21 @@ export const movementParamsSchema = z.object({
   id: z.string().uuid(),
 });
 
+/**
+ * Global movement-history query (docs/api.md §Phase 08). Every filter is
+ * optional and combinable, applied in the DB so pagination `meta` stays correct.
+ * `productId` scopes to one product; `type` to one movement type; `from`/`to`
+ * bound the `createdAt` range (ISO-8601, coerced to Date). Owner-scoping is
+ * enforced in the repository, never taken from the query.
+ */
+export const listMovementsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  productId: z.string().uuid().optional(),
+  type: movementTypeSchema.optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+
 export type RecordMovementBody = z.infer<typeof recordMovementSchema>;
+export type ListMovementsQuery = z.infer<typeof listMovementsQuerySchema>;

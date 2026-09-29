@@ -20,13 +20,28 @@ import { stockRoutes } from "./modules/stock/routes";
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: env.NODE_ENV !== "test",
+    // Bound request bodies (this API only accepts small JSON payloads).
+    bodyLimit: 256 * 1024, // 256 KiB
   });
 
   // Security & cross-origin.
-  await app.register(helmet);
+  // The API serves JSON to a separate-origin SPA with credentials, so the
+  // Cross-Origin-Resource-Policy must allow cross-origin reads (CORS still
+  // governs who may read); helmet's other protections (HSTS, nosniff, frame
+  // guards, hidePoweredBy, etc.) keep their secure defaults. See docs/security.md §8.
+  await app.register(helmet, {
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  });
   await app.register(cors, { origin: corsOrigins, credentials: true });
   await app.register(cookie);
-  await app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
+  await app.register(rateLimit, {
+    max: 100,
+    timeWindow: "1 minute",
+    // Emit the standard error envelope on throttle (docs/api.md).
+    errorResponseBuilder: () => ({
+      error: { code: "RATE_LIMITED", message: "Too many requests." },
+    }),
+  });
 
   registerErrorHandler(app);
   registerAuth(app);

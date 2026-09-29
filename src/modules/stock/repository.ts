@@ -52,10 +52,19 @@ export async function applyStockMovement(input: ApplyMovementInput): Promise<Sto
       },
     });
 
-    await tx.product.update({
-      where: { id: input.productId },
+    // Defense-in-depth: scope the cache write to the owner's live product too.
+    // The row above is already ownership-checked and FOR UPDATE-locked, so this
+    // is belt-and-suspenders — it binds the sole quantity write to `ownerId` so a
+    // cross-owner update stays impossible even if the guard above is ever
+    // refactored. `updateMany` lets us add `ownerId` to the `where` (a plain
+    // `update` cannot) and returns the affected count.
+    const { count } = await tx.product.updateMany({
+      where: { id: input.productId, ownerId: input.ownerId, archivedAt: null },
       data: { quantity: balanceAfter },
     });
+    if (count !== 1) {
+      throw new AppError("NOT_FOUND", "Product not found.");
+    }
 
     return movement;
   });
@@ -70,4 +79,54 @@ export function listMovementsForProduct(
     where: { ownerId, productId },
     orderBy: { createdAt: "desc" },
   });
+}
+
+/** A ledger movement joined with its product's current name (global history). */
+export type MovementWithProduct = Prisma.StockMovementGetPayload<{
+  include: { product: { select: { name: true } } };
+}>;
+
+export interface ListMovementsOptions {
+  page: number;
+  pageSize: number;
+  productId?: string;
+  type?: MovementType;
+  from?: Date;
+  to?: Date;
+}
+
+/**
+ * A page of the owner's stock movements across all products (Phase 08 global
+ * history), newest first, with total count. Optional filters (product, type,
+ * created-at range) are pushed into the query so pagination `meta` stays
+ * correct. Owner-scoped (ADR-002); rides `@@index([ownerId, createdAt desc])`,
+ * with a stable `id` tiebreaker so a page never drops or repeats a row.
+ */
+export async function listMovementsForOwner(
+  ownerId: string,
+  options: ListMovementsOptions,
+): Promise<{ items: MovementWithProduct[]; total: number }> {
+  const { page, pageSize, productId, type, from, to } = options;
+
+  const where: Prisma.StockMovementWhereInput = {
+    ownerId,
+    ...(productId ? { productId } : {}),
+    ...(type ? { type } : {}),
+    ...(from || to
+      ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }
+      : {}),
+  };
+
+  const [items, total] = await Promise.all([
+    prisma.stockMovement.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      include: { product: { select: { name: true } } },
+    }),
+    prisma.stockMovement.count({ where }),
+  ]);
+
+  return { items, total };
 }

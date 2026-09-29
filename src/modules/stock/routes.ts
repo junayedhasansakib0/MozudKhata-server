@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { requireUser } from "../../lib/auth-context";
 import { requireCsrf } from "../auth/csrf";
 import * as productService from "../products/service";
-import { movementParamsSchema, recordMovementSchema } from "./schema";
+import { listMovementsQuerySchema, movementParamsSchema, recordMovementSchema } from "./schema";
 import * as stockService from "./service";
 
 /**
@@ -17,6 +17,15 @@ import * as stockService from "./service";
  * (so a foreign/unknown id is 404, not an empty list that leaks existence).
  */
 export async function stockRoutes(app: FastifyInstance): Promise<void> {
+  // Owner's movement history across all products (Phase 08 global history).
+  // Read-only, session-scoped, no CSRF; filters + pagination applied in the DB.
+  app.get("/movements", { preHandler: [app.requireAuth] }, async (request) => {
+    const { id: ownerId } = requireUser(request);
+    const query = listMovementsQuerySchema.parse(request.query);
+    const { movements, meta } = await stockService.listOwnerMovements(ownerId, query);
+    return { data: { movements }, meta };
+  });
+
   app.post(
     "/products/:id/movements",
     { preHandler: [app.requireAuth, requireCsrf] },

@@ -67,10 +67,23 @@ export function registerErrorHandler(app: FastifyInstance): void {
       });
     }
 
-    if (error.statusCode === 429) {
-      return reply
-        .status(429)
-        .send({ error: { code: "RATE_LIMITED", message: "Too many requests." } });
+    // Framework-raised client errors (malformed JSON, unsupported media type,
+    // payload too large, throttling, …) carry a 4xx `statusCode`. Map them to the
+    // standard envelope with a safe, generic message instead of masking them as a
+    // 500 — but never echo the framework's raw message (may leak internals).
+    const status = typeof error.statusCode === "number" ? error.statusCode : undefined;
+    if (status && status >= 400 && status < 500) {
+      const clientError: Record<number, { code: ErrorCode; message: string }> = {
+        400: { code: "VALIDATION_ERROR", message: "Invalid request." },
+        401: { code: "UNAUTHORIZED", message: "Authentication required." },
+        403: { code: "FORBIDDEN", message: "Forbidden." },
+        404: { code: "NOT_FOUND", message: "Resource not found." },
+        413: { code: "VALIDATION_ERROR", message: "Request payload too large." },
+        415: { code: "VALIDATION_ERROR", message: "Unsupported media type." },
+        429: { code: "RATE_LIMITED", message: "Too many requests." },
+      };
+      const mapped = clientError[status] ?? { code: "VALIDATION_ERROR" as ErrorCode, message: "Invalid request." };
+      return reply.status(status).send({ error: { code: mapped.code, message: mapped.message } });
     }
 
     app.log.error(error);

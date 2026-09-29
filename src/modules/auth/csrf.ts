@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import { AppError } from "../../lib/errors";
 import { generateCsrfToken } from "../../lib/tokens";
 import { CSRF_COOKIE_NAME, setCsrfCookie } from "./session";
@@ -16,12 +17,20 @@ export function issueCsrfToken(reply: FastifyReply): string {
   return token;
 }
 
+/** Length-guarded constant-time string compare (avoids leaking match progress). */
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
 export async function requireCsrf(request: FastifyRequest): Promise<void> {
   const cookieToken = request.cookies[CSRF_COOKIE_NAME];
   const headerRaw = request.headers["x-csrf-token"];
   const headerToken = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
 
-  if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+  if (!cookieToken || !headerToken || !safeEqual(cookieToken, headerToken)) {
     throw new AppError("FORBIDDEN", "Invalid or missing CSRF token.");
   }
 }

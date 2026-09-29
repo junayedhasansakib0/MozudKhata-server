@@ -1,5 +1,6 @@
 import { Prisma, type MovementType, type StockMovement } from "@prisma/client";
 import * as repo from "./repository";
+import type { ListMovementsQuery } from "./schema";
 import { signedDelta } from "./math";
 
 /**
@@ -71,4 +72,39 @@ export async function listProductMovements(
 ): Promise<PublicMovement[]> {
   const movements = await repo.listMovementsForProduct(ownerId, productId);
   return movements.map(toPublicMovement);
+}
+
+/**
+ * A ledger movement enriched with its product's current name — the shape the
+ * global history view returns so each row is readable without a second lookup
+ * (docs/api.md §Phase 08).
+ */
+export interface PublicMovementWithProduct extends PublicMovement {
+  productName: string;
+}
+
+function toPublicMovementWithProduct(m: repo.MovementWithProduct): PublicMovementWithProduct {
+  return { ...toPublicMovement(m), productName: m.product.name };
+}
+
+export interface PaginatedMovements {
+  movements: PublicMovementWithProduct[];
+  meta: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+/**
+ * The owner's movement history across all products, paginated and optionally
+ * filtered (product/type/date range). Filtering + counting happen in the
+ * repository query so `meta` stays consistent with the returned rows.
+ */
+export async function listOwnerMovements(
+  ownerId: string,
+  query: ListMovementsQuery,
+): Promise<PaginatedMovements> {
+  const { page, pageSize } = query;
+  const { items, total } = await repo.listMovementsForOwner(ownerId, query);
+  return {
+    movements: items.map(toPublicMovementWithProduct),
+    meta: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+  };
 }
