@@ -133,11 +133,48 @@ vi.mock("../src/modules/products/repository", () => ({
     h.store.products.find((x) => x.ownerId === ownerId && x.sku === sku) ?? null,
   listProductsPageForOwner: async (
     ownerId: string,
-    opts: { page: number; pageSize: number; includeArchived?: boolean },
+    opts: {
+      page: number;
+      pageSize: number;
+      includeArchived?: boolean;
+      q?: string;
+      categoryId?: string;
+      stockStatus?: "IN_STOCK" | "LOW" | "OUT";
+      sort?: "name" | "createdAt" | "updatedAt" | "quantity";
+      order?: "asc" | "desc";
+    },
   ) => {
-    const all = h.store.products
-      .filter((p) => p.ownerId === ownerId && (opts.includeArchived || p.archivedAt === null))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    let all = h.store.products.filter(
+      (p) => p.ownerId === ownerId && (opts.includeArchived || p.archivedAt === null),
+    );
+    if (opts.categoryId) all = all.filter((p) => p.categoryId === opts.categoryId);
+    if (opts.q) {
+      const needle = opts.q.toLowerCase();
+      all = all.filter(
+        (p) =>
+          p.name.toLowerCase().includes(needle) ||
+          (p.sku ?? "").toLowerCase().includes(needle),
+      );
+    }
+    if (opts.stockStatus) {
+      all = all.filter((p) => {
+        const qty = Number(p.quantity);
+        const threshold = Number(p.lowStockThreshold);
+        const status = qty <= 0 ? "OUT" : qty <= threshold ? "LOW" : "IN_STOCK";
+        return status === opts.stockStatus;
+      });
+    }
+    const sort = opts.sort ?? "name";
+    const order = opts.order ?? "asc";
+    all = all.slice().sort((a, b) => {
+      let cmp: number;
+      if (sort === "quantity") cmp = Number(a.quantity) - Number(b.quantity);
+      else if (sort === "createdAt") cmp = a.createdAt.getTime() - b.createdAt.getTime();
+      else if (sort === "updatedAt") cmp = a.updatedAt.getTime() - b.updatedAt.getTime();
+      else cmp = a.name.localeCompare(b.name);
+      if (cmp === 0) cmp = a.id.localeCompare(b.id);
+      return order === "desc" ? -cmp : cmp;
+    });
     const start = (opts.page - 1) * opts.pageSize;
     return { items: all.slice(start, start + opts.pageSize).map(h.joinCat), total: all.length };
   },
@@ -358,5 +395,106 @@ describe("product & category routes", () => {
       payload: { name: "NoCsrf" },
     });
     expect(res.statusCode).toBe(403);
+  });
+
+  // --- Phase 06 — search, filtering & sorting ---
+
+  const listUrl = (qs: string) => `/api/v1/products?${qs}`;
+  const listNames = (res: { json: () => { data: { products: Array<{ name: string }> } } }) =>
+    res.json().data.products.map((p) => p.name);
+
+  // Poke the in-memory store the way the stock service would, since CRUD never
+  // writes quantity. Returns the created product id.
+  async function createProductWithQuantity(
+    payload: Record<string, unknown>,
+    quantity: number,
+  ): Promise<string> {
+    const created = (await createProduct(payload)).json().data.product;
+    const row = h.store.products.find((p) => p.id === created.id)!;
+    row.quantity = quantity;
+    return created.id;
+  }
+
+  it("searches products by name or SKU (case-insensitive)", async () => {
+    await createProduct({ name: "Cola 500ml", sku: "COLA-500" });
+    await createProduct({ name: "Diet Cola", sku: "DCOLA-500" });
+    await createProduct({ name: "Water", sku: "H2O-1" });
+
+    const byName = await app.inject({ method: "GET", url: listUrl("q=cola"), cookies: auth });
+    expect(listNames(byName).sort()).toEqual(["Cola 500ml", "Diet Cola"]);
+
+    const bySku = await app.inject({ method: "GET", url: listUrl("q=h2o"), cookies: auth });
+    expect(listNames(bySku)).toEqual(["Water"]);
+  });
+
+  it("filters products by category", async () => {
+    const drinks = (await createCategory("Drinks")).json().data.category;
+    await createProduct({ name: "Cola", categoryId: drinks.id });
+    await createProduct({ name: "Uncategorized item" });
+
+    const res = await app.inject({
+      method: "GET",
+      url: listUrl(`categoryId=${drinks.id}`),
+      cookies: auth,
+    });
+    expect(listNames(res)).toEqual(["Cola"]);
+    expect(res.json().meta.total).toBe(1);
+  });
+
+  it("filters products by derived stock status", async () => {
+    await createProductWithQuantity({ name: "Empty", lowStockThreshold: "5" }, 0); // OUT
+    await createProductWithQuantity({ name: "Running low", lowStockThreshold: "5" }, 3); // LOW
+    await createProductWithQuantity({ name: "Plenty", lowStockThreshold: "5" }, 50); // IN_STOCK
+
+    const out = await app.inject({ method: "GET", url: listUrl("stockStatus=OUT"), cookies: auth });
+    expect(listNames(out)).toEqual(["Empty"]);
+
+    const low = await app.inject({ method: "GET", url: listUrl("stockStatus=LOW"), cookies: auth });
+    expect(listNames(low)).toEqual(["Running low"]);
+
+    const inStock = await app.inject({
+      method: "GET",
+      url: listUrl("stockStatus=IN_STOCK"),
+      cookies: auth,
+    });
+    expect(listNames(inStock)).toEqual(["Plenty"]);
+  });
+
+  it("sorts products by quantity descending", async () => {
+    await createProductWithQuantity({ name: "Low qty" }, 2);
+    await createProductWithQuantity({ name: "High qty" }, 90);
+    await createProductWithQuantity({ name: "Mid qty" }, 40);
+
+    const res = await app.inject({
+      method: "GET",
+      url: listUrl("sort=quantity&order=desc"),
+      cookies: auth,
+    });
+    expect(listNames(res)).toEqual(["High qty", "Mid qty", "Low qty"]);
+  });
+
+  it("preserves pagination meta while filtering", async () => {
+    for (let i = 0; i < 3; i += 1) {
+      await createProduct({ name: `Widget ${i}` });
+    }
+    await createProduct({ name: "Gadget" });
+
+    const res = await app.inject({
+      method: "GET",
+      url: listUrl("q=widget&page=1&pageSize=2"),
+      cookies: auth,
+    });
+    expect(res.json().data.products).toHaveLength(2);
+    expect(res.json().meta).toEqual({ page: 1, pageSize: 2, total: 3, totalPages: 2 });
+  });
+
+  it("rejects an out-of-allowlist sort field with 400", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: listUrl("sort=ownerId"),
+      cookies: auth,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe("VALIDATION_ERROR");
   });
 });

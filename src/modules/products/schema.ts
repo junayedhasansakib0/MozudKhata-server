@@ -48,6 +48,9 @@ export const productParamsSchema = z.object({
   id: z.string().uuid(),
 });
 
+// Sortable columns (allowlist — never interpolate a client string into orderBy).
+export const productSortFields = ["name", "createdAt", "updatedAt", "quantity"] as const;
+
 export const listProductsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
@@ -55,6 +58,21 @@ export const listProductsQuerySchema = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => v === "true"),
+  // Phase 06 — free-text search over name + SKU. An empty box is treated as "no
+  // search" rather than a validation error.
+  q: z
+    .string()
+    .trim()
+    .max(200)
+    .optional()
+    .transform((v) => (v ? v : undefined)),
+  // Filter to one owned category.
+  categoryId: z.string().uuid().optional(),
+  // Filter by derived stock status (computed in-DB, see repository).
+  stockStatus: z.enum(["IN_STOCK", "LOW", "OUT"]).optional(),
+  // Sort column (allowlist) + direction; defaults preserve the Phase 04 name-asc order.
+  sort: z.enum(productSortFields).default("name"),
+  order: z.enum(["asc", "desc"]).default("asc"),
 });
 
 export type CreateProductInput = z.infer<typeof createProductSchema>;

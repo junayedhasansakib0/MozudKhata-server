@@ -63,11 +63,16 @@ export async function listProducts(
   ownerId: string,
   query: ListProductsQuery,
 ): Promise<PaginatedProducts> {
-  const { page, pageSize, includeArchived } = query;
+  const { page, pageSize, includeArchived, q, categoryId, stockStatus, sort, order } = query;
   const { items, total } = await repo.listProductsPageForOwner(ownerId, {
     page,
     pageSize,
     includeArchived,
+    q,
+    categoryId,
+    stockStatus,
+    sort,
+    order,
   });
   return {
     products: items.map(toPublicProduct),

@@ -10,10 +10,12 @@ import {
 import * as productService from "./service";
 
 /**
- * Product CRUD routes (docs/api.md §Phase 04). Mounted under `/api/v1`. Every
- * route requires a session; state-changing routes also require the double-submit
- * CSRF token. Stock is NOT changed here — that is the stock service's job (the
- * movement route arrives in Phase 05). Handlers stay thin; rules live in the service.
+ * Product CRUD routes (docs/api.md §Phase 04, extended in §Phase 06). Mounted
+ * under `/api/v1`. Every route requires a session; state-changing routes also
+ * require the double-submit CSRF token. Stock is NOT changed here — that is the
+ * stock service's job. `GET /products` supports search/filter/sort query params
+ * (Phase 06), parsed by `listProductsQuerySchema`. Handlers stay thin; rules
+ * live in the service.
  */
 export async function productRoutes(app: FastifyInstance): Promise<void> {
   app.get("/products", { preHandler: [app.requireAuth] }, async (request) => {
