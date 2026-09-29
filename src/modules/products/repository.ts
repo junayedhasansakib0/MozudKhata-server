@@ -56,8 +56,11 @@ export function findProductBySkuForOwner(ownerId: string, sku: string): Promise<
  * in the database so pagination/counts stay correct (no in-memory filtering).
  * `low_stock_threshold` is CHECK-constrained `>= 0`, so `quantity > threshold`
  * already implies `quantity > 0` (IN_STOCK). Mirrors `status.ts` exactly.
+ *
+ * Exported so the dashboard's LOW/OUT counts reuse the identical SQL buckets —
+ * keeping derived stock status a single source of truth (ADR-004/ADR-020/ADR-024).
  */
-function stockStatusWhere(status?: "IN_STOCK" | "LOW" | "OUT"): Prisma.ProductWhereInput {
+export function stockStatusWhere(status?: "IN_STOCK" | "LOW" | "OUT"): Prisma.ProductWhereInput {
   switch (status) {
     case "OUT":
       return { quantity: { lte: 0 } };

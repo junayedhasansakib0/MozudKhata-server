@@ -51,9 +51,10 @@ Base path `/api/v1`. Documented in full in [../docs/api.md](../docs/api.md):
 - **Categories:** `GET/POST /categories`, `GET/PATCH /categories/:id`, `POST /categories/:id/archive|restore`.
 - **Products:** `GET/POST /products` (paginated; `GET` supports `q`/`categoryId`/`stockStatus`/`sort`/`order` search-filter-sort), `GET/PATCH /products/:id`, `POST /products/:id/archive|restore`.
 - **Stock movements:** `POST /products/:id/movements` (record IN/OUT/ADJUSTMENT/DAMAGED_LOST), `GET /products/:id/movements` (per-product history, newest first).
+- **Dashboard:** `GET /dashboard` (owner-scoped aggregate metrics — product/stock/low/out/category counts + recent activity; read-only, no CSRF).
 
 Reads require an authenticated session; state-changing requests also require the double-submit CSRF header. See [../docs/security.md](../docs/security.md).
 
 ## Status
 
-**Phase 06 — Search & Filtering complete.** Auth & accounts, category/product CRUD (with server-derived stock status + pagination), stock movement recording/history, and product-list search/filter/sort (all pushed into the DB query so pagination stays correct) are implemented. **68 tests** pass; typecheck / lint / build green. The Phase 03 `core_domain` migration is authored but **not yet applied** to Neon (applying it is owner-gated). Next: Phase 07 — dashboard. See [../PROJECT_STATE.md](../PROJECT_STATE.md) for the live snapshot.
+**Phase 07 — Dashboard complete.** Auth & accounts, category/product CRUD (with server-derived stock status + pagination), stock movement recording/history, product-list search/filter/sort, and an owner-scoped aggregate dashboard endpoint (`GET /dashboard` — counts + total stock units + recent activity, all computed in-DB over the existing tables) are implemented. **73 tests** pass; typecheck / lint / build green. The Phase 03 `core_domain` migration is authored but **not yet applied** to Neon (applying it is owner-gated). Next: Phase 08 — history & analytics. See [../PROJECT_STATE.md](../PROJECT_STATE.md) for the live snapshot.

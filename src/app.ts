@@ -8,6 +8,7 @@ import { registerErrorHandler } from "./lib/errors";
 import { registerAuth } from "./plugins/auth";
 import { authRoutes } from "./modules/auth/routes";
 import { categoryRoutes } from "./modules/categories/routes";
+import { dashboardRoutes } from "./modules/dashboard/routes";
 import { healthRoutes } from "./modules/health/routes";
 import { productRoutes } from "./modules/products/routes";
 import { stockRoutes } from "./modules/stock/routes";
@@ -38,6 +39,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(categoryRoutes);
       await api.register(productRoutes);
       await api.register(stockRoutes);
+      await api.register(dashboardRoutes);
     },
     { prefix: "/api/v1" },
   );
