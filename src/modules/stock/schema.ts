@@ -23,7 +23,11 @@ const movementQuantitySchema = z
 export const recordMovementSchema = z.object({
   type: movementTypeSchema,
   quantity: movementQuantitySchema,
-  reason: z.string().trim().max(500).optional(),
+  // Accepts a string, `null`, or omission — the client sends `null` for a blank
+  // reason (matching the `"reason": … | null` contract in docs/api.md and the
+  // `.nullish()` convention used across the product schemas). The service
+  // normalizes `null`/`undefined` to a stored `null`.
+  reason: z.string().trim().max(500).nullish(),
 });
 
 export const movementParamsSchema = z.object({

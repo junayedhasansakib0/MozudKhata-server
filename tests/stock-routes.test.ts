@@ -247,6 +247,16 @@ describe("stock movement routes", () => {
     expect(movement.reason).toBe("Initial delivery");
   });
 
+  // Regression: the client sends `reason: null` (not omission) when the Reason
+  // box is blank. The schema must accept an explicit null — it once used
+  // `.optional()`, which rejected null and 400'd every blank-reason movement.
+  it("accepts an explicit null reason and stores it as null (201)", async () => {
+    const product = await createProduct();
+    const res = await record(product.id, { type: "IN", quantity: "5", reason: null });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().data.movement.reason).toBeNull();
+  });
+
   it("supports OUT, ADJUSTMENT, and DAMAGED_LOST and keeps the balance reconciled", async () => {
     const product = await createProduct();
     expect((await record(product.id, { type: "IN", quantity: "20" })).json().data.movement.balanceAfter).toBe("20");
